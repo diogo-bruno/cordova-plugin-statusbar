@@ -38,6 +38,7 @@ import java.util.Arrays;
 
 public class StatusBar extends CordovaPlugin {
     private static final String TAG = "StatusBar";
+    private Boolean updateNavigationBar = false;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -58,7 +59,7 @@ public class StatusBar extends CordovaPlugin {
                 // by the Cordova.
                 Window window = cordova.getActivity().getWindow();
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
-
+                
                 // Read 'StatusBarOverlaysWebView' from config.xml, default is true.
                 setStatusBarTransparent(preferences.getBoolean("StatusBarOverlaysWebView", true));
 
@@ -66,6 +67,7 @@ public class StatusBar extends CordovaPlugin {
                 setStatusBarBackgroundColor(preferences.getString("StatusBarBackgroundColor", "#000000"));
 
                 // Read 'StatusBarStyle' from config.xml, default is 'lightcontent'.
+                //setStatusBarStyle(preferences.getString("StatusBarStyle", "lightcontent"));
                 String styleSetting = preferences.getString("StatusBarStyle", "lightcontent");
                 if (styleSetting.equalsIgnoreCase("blacktranslucent") || styleSetting.equalsIgnoreCase("blackopaque")) {
                     LOG.w(TAG, styleSetting +" is deprecated and will be removed in next major release, use lightcontent");
@@ -210,6 +212,30 @@ public class StatusBar extends CordovaPlugin {
             return true;
         }
 
+        if ("androidUpdateNavigationBar".equals(action)) {
+            if (Build.VERSION.SDK_INT >= 21) {
+                updateNavigationBar = args.getBoolean(0);
+                return true;
+            }
+            else return args.getBoolean(0) == false;
+        }
+
+        if ("setColorNavigationBar".equals(action)) {
+            this.cordova.getActivity().runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (Build.VERSION.SDK_INT >= 21) {
+                            setColorNavigationBar(args.getBoolean(0), args.getString(1));
+                        }
+                    } catch (JSONException ignore) {
+                        LOG.e(TAG, "Invalid hexString argument, use f.i. '#777777'");
+                    }
+                }
+            });
+            return true;
+        }
+
         return false;
     }
 
@@ -223,6 +249,11 @@ public class StatusBar extends CordovaPlugin {
                 try {
                     // Using reflection makes sure any 5.0+ device will work without having to compile with SDK level 21
                     window.getClass().getMethod("setStatusBarColor", int.class).invoke(window, Color.parseColor(colorPref));
+
+                    if(updateNavigationBar){
+                        window.getClass().getMethod("setNavigationBarColor", int.class).invoke(window, Color.parseColor(colorPref));
+                    }
+
                 } catch (IllegalArgumentException ignore) {
                     LOG.e(TAG, "Invalid hexString argument, use f.i. '#999999'");
                 } catch (Exception ignore) {
@@ -267,12 +298,24 @@ public class StatusBar extends CordovaPlugin {
                 };
 
                 if (Arrays.asList(darkContentStyles).contains(style.toLowerCase())) {
-                    decorView.setSystemUiVisibility(uiOptions | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+
+                    if(updateNavigationBar){
+                        decorView.setSystemUiVisibility(uiOptions | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+                    }else{
+                        decorView.setSystemUiVisibility(uiOptions | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                    }
+
                     return;
                 }
 
                 if (Arrays.asList(lightContentStyles).contains(style.toLowerCase())) {
-                    decorView.setSystemUiVisibility(uiOptions & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+
+                    if(updateNavigationBar){
+                        decorView.setSystemUiVisibility(uiOptions & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR & ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+                    }else{
+                        decorView.setSystemUiVisibility(uiOptions & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                    }
+
                     return;
                 }
 
@@ -280,4 +323,41 @@ public class StatusBar extends CordovaPlugin {
             }
         }
     }
+
+    private void setColorNavigationBar(final Boolean light, final String colorPref) {
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (light != null) {
+                    View decorView = cordova.getActivity().getWindow().getDecorView();
+                    int uiOptions = decorView.getSystemUiVisibility();
+                    if (!light) {
+                        decorView.setSystemUiVisibility(uiOptions | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+                    }
+                     if (light) {
+                        decorView.setSystemUiVisibility(uiOptions & ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= 21) {
+                if (colorPref != null && !colorPref.isEmpty()) {
+                    final Window window = cordova.getActivity().getWindow();
+                    // Method and constants not available on all SDKs but we want to be able to compile this code with any SDK
+                    window.clearFlags(0x04000000); // SDK 19: WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+                    window.addFlags(0x80000000); // SDK 21: WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                    try {
+
+                      window.getClass().getMethod("setNavigationBarColor", int.class).invoke(window, Color.parseColor(colorPref));
+
+                    } catch (IllegalArgumentException ignore) {
+                        LOG.e(TAG, "Invalid hexString argument, use f.i. '#999999'");
+                    } catch (Exception ignore) {
+                        // this should not happen, only in case Android removes this method in a version > 21
+                        LOG.w(TAG, "Method window.setStatusBarColor not found for SDK level " + Build.VERSION.SDK_INT);
+                    }
+                }
+            }
+
+        }
+
 }
